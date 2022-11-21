@@ -4,6 +4,9 @@
   "main": "index.js",
   "author": "tztokchad <tz@dopex.io>",
   "license": "MIT",
+  "scripts": {
+    "start": "node index"
+  },
   "dependencies": {
     "bybit-api": "^3.3.3",
     "dotenv": "^16.0.2",
