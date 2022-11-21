@@ -1,0 +1,12 @@
+{
+  "name": "straddles-hedge",
+  "version": "1.0.0",
+  "main": "index.js",
+  "author": "tztokchad <tz@dopex.io>",
+  "license": "MIT",
+  "dependencies": {
+    "bybit-api": "^3.3.3",
+    "dotenv": "^16.0.2",
+    "web3": "^1.7.5"
+  }
+}
