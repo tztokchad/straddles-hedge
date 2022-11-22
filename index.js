@@ -85,6 +85,13 @@ const fillPuts = async (lastPrice, toFill) => {
   }
 };
 
+// Retrieve bybit portfolio greeks
+const getGreeks = async () => bybitOptions.getAssetInfo("ETH");
+
+// Retrieve bybit portfolio positions
+const getPositions = async () =>
+  bybitOptions.getPositions({ category: "OPTION", baseCoin: "ETH" });
+
 // Watch straddle purchases
 const watchPurchaseEvents = () => {
   ethStraddle.events
@@ -162,6 +169,11 @@ const watchPurchaseEvents = () => {
 
   console.log({ underlyingPrice, premium });
 
-  watchPurchaseEvents();
+  // watchPurchaseEvents();
+  const greeks = await getGreeks();
+  console.log(greeks.result.dataList);
+
+  const positions = await getPositions();
+  console.log(positions.result.dataList);
   // await fillPuts(lastPrice, totalSellableStraddles);
 })();
