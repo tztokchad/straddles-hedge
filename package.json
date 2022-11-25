@@ -5,7 +5,7 @@
   "author": "tztokchad <tz@dopex.io>",
   "license": "MIT",
   "scripts": {
-    "start": "node index"
+    "start": "node ./src/index"
   },
   "dependencies": {
     "bybit-api": "^3.3.3",

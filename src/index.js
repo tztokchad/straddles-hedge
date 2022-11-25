@@ -7,8 +7,8 @@ const Web3 = require("web3");
 const web3 = new Web3(process.env.RPC_URL);
 
 const ethStraddle = new web3.eth.Contract(
-  require("./ETHAtlanticStraddle.json").abi,
-  require("./ETHAtlanticStraddle.json").address
+  require("../abi/ETHAtlanticStraddle.json").abi,
+  require("../abi/ETHAtlanticStraddle.json").address
 );
 
 const client = {
@@ -24,6 +24,11 @@ const bybitOptions = new USDCOptionClient({
   testnet: false
 });
 
+const { toBN, getExpirySymbol, getLastPrice } = require("../utils")(
+  web3,
+  bybitSpot
+);
+
 // Map closest strikes to positions
 let hedges = {};
 
@@ -36,24 +41,6 @@ let hedges = {};
  * }
  * }
  */
-
-const toBN = n => web3.utils.toBN(n);
-
-const getLastPrice = async () =>
-  parseFloat((await bybitSpot.getLastTradedPrice("ETHUSDT")).result.price);
-
-const getExpirySymbol = (expiry, lastPrice) => {
-  const expiryDate = new Date(expiry * 1000);
-  const month = expiryDate.toLocaleString("default", { month: "short" });
-  const day = expiryDate.getUTCDate();
-  const year = expiryDate
-    .getFullYear()
-    .toString()
-    .slice(-2);
-  // Compute strike closest to last price
-  let closest = (Math.floor(lastPrice / 25) * 25).toString();
-  return `ETH-${day}${month.toUpperCase()}${year}-${closest}-P`;
-};
 
 // Fill puts to hedge new purchases
 const fillPuts = async (symbol, toFill) => {
