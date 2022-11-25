@@ -5,6 +5,7 @@ coverage.json
 typechain
 
 orderbook.json
+markets.json
 
 #Hardhat files
 cache
