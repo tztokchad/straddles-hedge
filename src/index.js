@@ -24,14 +24,17 @@ const bybitOptions = new USDCOptionClient({
   testnet: false
 });
 
-const { toBN, getExpirySymbol, getLastPrice } = require("../utils")(
-  web3,
-  bybitSpot
-);
+const { toBN, getExpirySymbol } = require("../utils")(web3, bybitSpot);
 
 // Map closest strikes to positions
 let hedges = {};
 
+// Expiry timestamp
+let epochExpiry;
+// Share of pool
+let poolShare;
+
+// Market buy puts from bybit
 const marketBuyPuts = async (symbol, size) => {
   let params = {
     symbol,
@@ -47,6 +50,14 @@ const marketBuyPuts = async (symbol, size) => {
     throw new Error(`Error submitting order: ${response.retMsg}`);
 };
 
+// Save orderbook for reference
+const saveOrderbook = orderbook =>
+  fs.writeFile("./orderbook.json", JSON.stringify(orderbook), err => {
+    console.log(
+      err ? "Error writing orderbook" : "Successfully saved orderbook"
+    );
+  });
+
 // Fill puts to hedge new purchases
 const fillPuts = async (symbol, toFill, premiumPerStraddle) => {
   let markets = (await bybitOptions.getContractInfo({
@@ -61,36 +72,27 @@ const fillPuts = async (symbol, toFill, premiumPerStraddle) => {
   // Get best ask
   orderbook = orderbook.filter(order => order.side === "Sell");
 
-  // Write to files
-  fs.writeFile("./orderbook.json", JSON.stringify(orderbook), err => {
-    console.log(
-      err ? "Error writing orderbook" : "Successfully saved orderbook"
-    );
-  });
+  // Save orderbook for reference
+  saveOrderbook(orderbook);
 
   if (orderbook.length > 0) {
     let i = 0;
     let priceTooHigh = false;
     while (toFill > 0 && i <= orderbook.length && !priceTooHigh) {
+      // Hedge only if price is lesser than premium collected
       if (orderbook[i].price <= premiumPerStraddle) {
+        console.log(`Puts available @ ${orderbook[i].price}`);
         let size = parseFloat(orderbook[i].size);
         let filled = 0;
         if (toFill >= size) {
-          console.log(await marketBuyPuts(symbol, size));
+          await marketBuyPuts(symbol, size);
           toFill -= size;
           filled += size;
         } else {
-          console.log(await marketBuyPuts(symbol, toFill));
+          await marketBuyPuts(symbol, toFill);
           filled += toFill;
           toFill = 0;
         }
-        console.log(
-          "Ask:",
-          orderbook[i].size,
-          "puts @",
-          orderbook[i].price,
-          "USDC"
-        );
         console.log(
           `Filled ${filled} @ ${orderbook[i++].price}. Remaining to fill: ${toFill}`
         );
@@ -115,7 +117,7 @@ const getPositions = async expirySymbol => {
   );
 };
 
-// Handle previous straddle purchase events for epoch
+// Get previous straddle purchase events for epoch
 const getPreviousPurchases = async currentEpoch =>
   new Promise((resolve, reject) => {
     ethStraddle.getPastEvents(
@@ -149,7 +151,7 @@ const getPreviousPurchases = async currentEpoch =>
   });
 
 // Watch straddle purchases
-const watchPurchaseEvents = (expiry, poolShare) => {
+const watchPurchaseEvents = () => {
   ethStraddle.events
     .Purchase({
       fromBlock: "latest"
@@ -176,31 +178,42 @@ const watchPurchaseEvents = (expiry, poolShare) => {
       });
       const amountToHedge = (underlyingPurchased * 2 * poolShare) / 100;
       // Get symbol for Bybit expiry
-      const expirySymbol = getExpirySymbol(expiry, apStrike);
+      const expirySymbol = getExpirySymbol(
+        epochExpiry,
+        apStrike,
+        premiumPerStraddle
+      );
       console.log(
         `To hedge: ${amountToHedge} puts sold @ $${apStrike} w/ ${expirySymbol}`
       );
-      await fillPuts(expirySymbol, amountToHedge);
+      await fillPuts(expirySymbol, amountToHedge, premiumPerStraddle);
     })
     .on("error", (err, receipt) => {
       console.error("Error on Purchase event:", err, receipt);
     });
 };
 
-(async () => {
+// Watch for new bootstraps. If done, reset the bot
+const watchBootstrapEvents = () => {
+  ethStraddle.events
+    .Bootstrap({
+      fromBlock: "latest"
+    })
+    .on("connected", () => console.log("Listening for bootstrap events"))
+    .on("data", async event => {
+      // Re-run script
+      await run();
+    })
+    .on("error", (err, receipt) => {
+      console.error("Error on Bootstrap event:", err, receipt);
+    });
+};
+
+async function run(isInit) {
   const currentEpoch = await ethStraddle.methods.currentEpoch().call();
   const epochData = await ethStraddle.methods.epochData(currentEpoch).call();
-  const { expiry, usdDeposits, underlyingPurchased } = epochData;
-  const underlyingPrice = await ethStraddle.methods.getUnderlyingPrice().call();
-  const premium =
-    toBN(
-      await ethStraddle.methods
-        .calculatePremium(true, underlyingPrice, underlyingPrice, 1e6, expiry)
-        .call()
-    )
-      .div(toBN(1e8))
-      .toNumber() / 1e6;
-  let lastPrice = await getLastPrice();
+  const { expiry, usdDeposits } = epochData;
+  epochExpiry = expiry;
   console.log("Straddles data for epoch", currentEpoch, ":", epochData);
 
   // Get all write positions for address
@@ -224,47 +237,39 @@ const watchPurchaseEvents = (expiry, poolShare) => {
     throw new Error("No write positions for this epoch to hedge");
 
   // Calculate total USD deposits
-  let totalUsdDeposits = 0;
+  let writerUsdDeposits = 0;
   for (let wp of writePositionsForEpoch) {
-    totalUsdDeposits = toBN(wp.usdDeposit)
-      .add(toBN(totalUsdDeposits))
+    writerUsdDeposits = toBN(wp.usdDeposit)
+      .add(toBN(writerUsdDeposits))
       .toString();
   }
-  let availableUsdDeposits = toBN(totalUsdDeposits).toNumber() / 1e6;
-  let totalSellableStraddles =
-    toBN(totalUsdDeposits).toNumber() / 1e6 / lastPrice;
-  let poolShare =
-    toBN(totalUsdDeposits)
+  poolShare =
+    toBN(writerUsdDeposits)
       .mul(toBN(1e8)) // 1e6 (multiplier) * 1e2 (100%)
       .div(toBN(usdDeposits))
       .toNumber() / 1e6;
-  let poolPutsToPurchase = (underlyingPurchased * 2) / 1e18;
-  let writerPutsToPurchase = (poolPutsToPurchase * poolShare) / 100;
-  console.log("Total available USD deposits:", availableUsdDeposits);
-  console.log("Total sellable straddles:", totalSellableStraddles);
   console.log("Share of pool:", poolShare, "%");
-  console.log("Pool puts to purchase:", poolPutsToPurchase);
-  console.log("Writer puts to purchase:", writerPutsToPurchase);
-
-  console.log({ underlyingPrice, premium });
 
   const previousPurchases = await getPreviousPurchases(
     currentEpoch,
-    expiry,
+    epochExpiry,
     poolShare
   );
   for (let purchase of previousPurchases) {
     // Get symbol for Bybit expiry
-    const expirySymbol = getExpirySymbol(expiry, purchase.apStrike / 1e8);
     let { apStrike, underlyingPurchased, cost, straddleId } = purchase;
+    const premiumPerStraddle = cost / (underlyingPurchased * 2) / 1e8;
+    const expirySymbol = getExpirySymbol(
+      epochExpiry,
+      purchase.apStrike / 1e8,
+      premiumPerStraddle
+    );
     apStrike = apStrike / 1e8;
     underlyingPurchased = underlyingPurchased / 1e18;
-    const premiumPerStraddle = cost / (underlyingPurchased * 2);
-    console.log("New purchase event:", {
+    console.log("Previous purchase event:", {
       straddleId,
       cost,
       premiumPerStraddle,
-      purchase,
       underlyingPurchased,
       poolShare
     });
@@ -292,11 +297,19 @@ const watchPurchaseEvents = (expiry, poolShare) => {
       let premiumPerStraddle =
         hedges[strike].premiumCollected / hedges[strike].writes;
       console.log(
-        `Need to hedge an additional ${toFill} puts @ ${strike} (Must cost below $${premiumPerStraddle})`
+        `Need to hedge an additional ${toFill} puts @ ${strike} (Must cost below $${premiumPerStraddle.toFixed(
+          1
+        )})`
       );
       await fillPuts(strike, toFill, premiumPerStraddle);
     }
   }
 
-  // watchPurchaseEvents(expiry, poolShare);
-})();
+  // Watch for new events if initial run
+  if (isInit) {
+    watchBootstrapEvents();
+    watchPurchaseEvents();
+  }
+}
+
+run(true);
