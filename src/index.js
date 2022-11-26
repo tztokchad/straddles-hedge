@@ -47,7 +47,7 @@ const marketBuyPuts = async (symbol, size) => {
   console.log("Market buying puts:", params);
   const response = await bybitOptions.submitOrder(params);
   if (response.retCode !== 0)
-    throw new Error(`Error submitting order: ${response.retMsg}`);
+    throw new Error(`Bybit: submitting order: ${response.retMsg}`);
 };
 
 // Save orderbook for reference
