@@ -36,7 +36,13 @@ let poolShare;
 
 // Market buy puts from bybit
 const marketBuyPuts = async (symbol, size) => {
-  let params = {
+
+if (String(size.toFixed(1)) === '0.0') {
+  console.log("Size is too small");
+  return;
+}
+
+let params = {
     symbol,
     orderType: "Market",
     side: "Buy",
