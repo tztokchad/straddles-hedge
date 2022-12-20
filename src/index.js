@@ -24,7 +24,7 @@ const bybitOptions = new USDCOptionClient({
   testnet: false
 });
 
-const { toBN, getExpirySymbol } = require("../utils")(web3, bybitSpot);
+const { toBN, getExpirySymbol } = require("../utils")(web3, bybitSpot, bybitOptions);
 
 // Map closest strikes to positions
 let hedges = {};
@@ -184,7 +184,7 @@ const watchPurchaseEvents = () => {
       });
       const amountToHedge = (underlyingPurchased * 2 * poolShare) / 100;
       // Get symbol for Bybit expiry
-      const expirySymbol = getExpirySymbol(
+      const expirySymbol = await getExpirySymbol(
         epochExpiry,
         apStrike,
         premiumPerStraddle
@@ -265,7 +265,7 @@ async function run(isInit) {
     // Get symbol for Bybit expiry
     let { apStrike, underlyingPurchased, cost, straddleId } = purchase;
     const premiumPerStraddle = cost / (underlyingPurchased * 2) / 1e8;
-    const expirySymbol = getExpirySymbol(
+    const expirySymbol = await getExpirySymbol(
       epochExpiry,
       purchase.apStrike / 1e8,
       premiumPerStraddle
@@ -319,3 +319,4 @@ async function run(isInit) {
 }
 
 run(true);
+
